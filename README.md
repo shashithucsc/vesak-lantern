@@ -6,6 +6,8 @@ A cinematic Three.js experience inspired by a Sri Lankan Vesak night, built as a
 
 This project renders an interactive night scene with:
 - A stupa centerpiece
+- Enhanced moonlit sky with animated wisps
+- Side-positioned Buddhist flags that do not block the stupa view
 - Animated Atapattam lanterns
 - Floating clay lamps (Mati Pahan)
 - Fireflies, stars, mist, aurora bands, and fireworks
@@ -42,10 +44,13 @@ This project renders an interactive night scene with:
 ### Environment
 
 - Deep-gradient night background
+- Layered sky dome and zenith glow
 - Layered atmospheric fog
 - Starfields (far and near)
 - Water surface with animated wave displacement
 - Horizon mist and distant silhouette layers
+- Animated high-altitude sky wisps
+- Buddhist flag rows placed on left/right corridors
 
 ### Lighting and Effects
 
@@ -72,6 +77,14 @@ The scene automatically scales quality based on device capabilities:
 - Tuned bloom strength/radius for performance
 - Reduced pixel ratio target on mobile
 - Mobile-specific CSS adjustments for safe viewport sizing and readability
+
+Additional runtime optimizations:
+
+- Visibility-aware rendering updates pause heavy animation work when the tab is hidden
+- Mobile update stride reduces frequency of expensive dynamic updates (water/fireflies)
+- Sky lantern cap prevents unbounded object growth and memory pressure
+- Firework simulation uses delta-time for stable behavior across different frame rates
+- Raycast helper objects are reused to avoid repeated allocations during interaction
 
 ## Local Asset Pipeline
 
@@ -140,6 +153,7 @@ npm run preview
 
 - Ensure quality detection is active (`isMobile` path)
 - Avoid increasing object counts and bloom values
+- Keep sky lantern cap and dynamic update stride in place for smoother frame times
 
 ## Notes
 
