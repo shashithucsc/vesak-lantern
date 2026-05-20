@@ -68,6 +68,101 @@ This project renders an interactive night scene with:
   - Twinkling specks
 - Animated loading text
 
+## Exact Build Ingredients (Geometry, Animation, Textures)
+
+This section documents the actual building blocks used in the Three.js scene.
+
+### Geometry and Shapes Used
+
+- `SphereGeometry`:
+  - Sky dome and zenith glow shells
+  - Moon and moon glow
+  - Stupa dome (half-sphere)
+  - Distant tree canopies
+  - Cinematic atmosphere veil and glow orb
+- `RingGeometry`:
+  - Moon halo ring
+- `PlaneGeometry`:
+  - Water surface mesh (high-segment plane for wave deformation)
+  - Ground/bank plane
+  - Aurora bands
+  - Horizon mist cards
+  - Sky wisps cards
+  - Buddhist flag stripes
+  - Lantern frills
+- `CylinderGeometry`:
+  - Stupa terrace rings
+  - Stupa spire base
+  - Flag poles and flag support arms
+  - Mati Pahan lamp base
+  - Sky lantern body
+  - Distant silhouette trunks
+- `ConeGeometry`:
+  - Stupa main spire
+  - Mati Pahan flame mesh
+- `BoxGeometry`:
+  - Stupa square section (Hathares Kotuwa)
+- `OctahedronGeometry`:
+  - Stupa crystal (Chudamanikya)
+  - Atapattam lantern main shell (scaled to elongate shape)
+- `BufferGeometry` (custom point clouds):
+  - Far stars
+  - Near stars
+  - Fireflies
+  - Firework particles (with custom `velocity` attribute)
+
+### How They Are Created
+
+- Procedural scene construction:
+  - Most objects are generated directly in code using Three.js geometry constructors and grouped with `THREE.Group`.
+- Composition approach:
+  - Complex objects (stupa, lanterns, lamps, flags) are assembled from multiple primitive meshes.
+- Imported asset:
+  - `public/vesak_lanterns.glb` is loaded through `GLTFLoader` and cloned into two placements.
+  - Loaded mesh materials are cloned so emissive and glow behavior can be tuned per instance.
+
+### How They Are Animated
+
+- Time-driven animation loop:
+  - `clock.getDelta()` and `clock.elapsedTime` drive all procedural motion.
+- Water animation:
+  - Vertex displacement on the water plane using sine/cosine wave formulas per vertex.
+- Lantern systems:
+  - Atapattam lanterns: vertical bobbing + rotation; temporary spin boost on click.
+  - Lantern frills: swinging with sinusoidal rotation.
+  - Sky lanterns: upward drift with horizontal wobble; removed when too high.
+- Lamp system (Mati Pahan):
+  - Small drifting motion on x/z, bobbing on y, flame flicker by scaling flame mesh and light intensity.
+- Atmospheric layers:
+  - Moon glow pulse by scale oscillation.
+  - Horizon mist slow drift.
+  - Aurora opacity and height modulation.
+  - Sky wisps drifting in x/y with opacity pulsing.
+  - Distant silhouette group subtle yaw sway.
+  - Flag stripes sway in rotation and slight y movement.
+- Particle systems:
+  - Fireflies orbit around base positions with phase offsets.
+  - Fireworks launch periodically; each particle updates by velocity, gravity, and drag, then fades out.
+- Post FX animation:
+  - Cinematic shader pass updates a time uniform (`uTime`) for subtle warm-lift grading variation.
+
+### Materials and Texture Usage
+
+- Core materials:
+  - `MeshStandardMaterial` for most lit scene objects (stupa, flags, lantern shells, ground, trunks, etc.).
+  - `MeshBasicMaterial` for unlit/glow cards and simple glow elements (sky layers, wisps, mist, halo, flames in some cases).
+  - `PointsMaterial` for stars, fireflies, and fireworks.
+- Visual treatment:
+  - Heavy use of `emissive` and `emissiveIntensity` for festival glow.
+  - Transparent materials and `AdditiveBlending` for atmospheric light accumulation.
+  - Wireframe overlay on Atapattam lanterns to represent bamboo framing.
+- Texture maps:
+  - No explicit external image texture maps are used for the procedural Three.js scene objects in code.
+  - The look is primarily color/emissive/roughness/metalness driven (material properties), plus animated geometry deformation and post-processing bloom.
+  - The GLB file may contain its own embedded/baked material data from the source model.
+- Non-Three.js visual textures (UI layer):
+  - The loading/UI visuals rely on CSS gradients, blur, and blend effects rather than bitmap textures.
+
 ## Mobile Optimization
 
 The scene automatically scales quality based on device capabilities:

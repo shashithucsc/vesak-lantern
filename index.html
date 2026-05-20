@@ -435,21 +435,40 @@
         let distantSilhouette;
         let skyWisps = [];
         let flagPanels = [];
+        let clickableLanternMeshes = [];
         let frameTick = 0;
         let isPageVisible = true;
 
         const isMobile = window.matchMedia('(max-width: 768px), (pointer: coarse)').matches;
-        const sceneQuality = isMobile ? 0.58 : 1;
-        const starCount = Math.max(900, Math.round(2000 * sceneQuality));
-        const nearStarCount = Math.max(240, Math.round(900 * sceneQuality));
-        const lanternCount = Math.max(12, Math.round(25 * sceneQuality));
-        const lampCount = Math.max(24, Math.round(60 * sceneQuality));
-        const fireflyCount = Math.max(80, Math.round(150 * sceneQuality));
+        const lowPowerDevice = isMobile || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
+        const sceneQuality = lowPowerDevice ? 0.5 : 0.82;
+        const starCount = Math.max(700, Math.round(1500 * sceneQuality));
+        const nearStarCount = Math.max(180, Math.round(600 * sceneQuality));
+        const lanternCount = Math.max(10, Math.round(20 * sceneQuality));
+        const lampCount = Math.max(18, Math.round(42 * sceneQuality));
+        const fireflyCount = Math.max(60, Math.round(120 * sceneQuality));
         const fireworkMinGap = isMobile ? 4.5 : 3;
         const fireworkMaxGap = isMobile ? 8 : 7;
-        const waterSegments = isMobile ? 22 : 50;
-        const skyLanternCap = isMobile ? 18 : 36;
-        const dynamicUpdateStride = isMobile ? 2 : 1;
+        const waterSegments = isMobile ? 16 : 30;
+        const skyLanternCap = isMobile ? 12 : 24;
+        const baseDynamicUpdateStride = lowPowerDevice ? 3 : 2;
+        const baseBloomScale = lowPowerDevice ? 0.58 : 0.72;
+        const fireworksParticleCount = lowPowerDevice ? 44 : 62;
+        const maxActiveFireworks = lowPowerDevice ? 1 : 2;
+        const lanternLightChance = lowPowerDevice ? 0.24 : 0.42;
+        const lampLightChance = lowPowerDevice ? 0.18 : 0.32;
+        const basePixelRatioCap = lowPowerDevice ? 1 : 1.35;
+        const baseBloomStrength = lowPowerDevice ? 0.8 : 1.05;
+        const baseBloomRadius = lowPowerDevice ? 0.45 : 0.62;
+        const baseBloomThreshold = 0.2;
+        const qualityScaleMin = 0.72;
+        const qualityScaleMax = 1;
+        let activeQualityScale = 1;
+        let activeDynamicUpdateStride = baseDynamicUpdateStride;
+        let activeBloomScale = baseBloomScale;
+        let adaptiveSampleTime = 0;
+        let adaptiveFrameCount = 0;
+        let visualUpdateStride = lowPowerDevice ? 3 : 2;
 
         // Colors for Buddhist Flag / Lanterns (Blue, Yellow, Red, White, Orange)
         const buddhistColors = [
@@ -475,13 +494,13 @@
             // 3. Renderer setup
             renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 2));
-            renderer.shadowMap.enabled = true;
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, basePixelRatioCap));
+            renderer.shadowMap.enabled = false;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             
             // Crucial for beautiful glowing effects
             renderer.toneMapping = THREE.ReinhardToneMapping;
-            renderer.toneMappingExposure = isMobile ? 1.08 : 1.2;
+            renderer.toneMappingExposure = lowPowerDevice ? 1.06 : 1.14;
             container.appendChild(renderer.domElement);
 
             // Post-Processing (UnrealBloomPass) to make lights glow
@@ -489,10 +508,10 @@
             
             // Resolution, strength, radius, threshold
             const bloomPass = new THREE.UnrealBloomPass(
-                new THREE.Vector2(window.innerWidth, window.innerHeight),
-                isMobile ? 1.05 : 1.5,   // Strength (High for Vesak)
-                isMobile ? 0.55 : 0.8,   // Radius
-                0.12                     // Threshold
+                new THREE.Vector2(window.innerWidth * activeBloomScale, window.innerHeight * activeBloomScale),
+                baseBloomStrength,
+                baseBloomRadius,
+                baseBloomThreshold
             );
 
             composer = new THREE.EffectComposer(renderer);
@@ -551,7 +570,6 @@
 
             const moonLight = new THREE.DirectionalLight(0x88bbff, 0.5);
             moonLight.position.set(-14, 45, -10);
-            moonLight.castShadow = true;
             scene.add(moonLight);
 
             const warmKey = new THREE.PointLight(0xffc56b, 1.5, 65);
@@ -649,6 +667,7 @@
             // Store original vertices for wave animation
             water.userData.originalZ = [];
             const pos = water.geometry.attributes.position;
+            pos.setUsage(THREE.DynamicDrawUsage);
             for(let i=0; i<pos.count; i++) water.userData.originalZ.push(pos.getZ(i));
             
             scene.add(water);
@@ -827,7 +846,9 @@
 
                     const poleTopGlow = new THREE.PointLight(0xffcf82, isMobile ? 0.25 : 0.4, 8);
                     poleTopGlow.position.set(layout.x, 7.2, zPos);
-                    scene.add(poleTopGlow);
+                    if (!lowPowerDevice) {
+                        scene.add(poleTopGlow);
+                    }
 
                     const flagGroup = new THREE.Group();
                     flagGroup.position.set(layout.x + layout.side * 1.35, 6.1, zPos);
@@ -961,6 +982,7 @@
             const lanternGeo = new THREE.OctahedronGeometry(1.2, 0);
             // Elongate to look like a Kooduwa
             lanternGeo.scale(1, 1.3, 1);
+            clickableLanternMeshes = [];
 
             for (let i = 0; i < numLanterns; i++) {
                 const group = new THREE.Group();
@@ -983,11 +1005,12 @@
                 const frame = new THREE.Mesh(lanternGeo, frameMat);
                 
                 // Light inside
-                const light = new THREE.PointLight(colorHex, 1.5, 15);
+                const light = Math.random() < lanternLightChance ? new THREE.PointLight(colorHex, lowPowerDevice ? 0.7 : 1.1, 11) : null;
 
                 group.add(shell);
                 group.add(frame);
-                group.add(light);
+                if (light) group.add(light);
+                clickableLanternMeshes.push(shell, frame);
 
                 // Add frills (Rella)
                 const frillMat = new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide });
@@ -1043,9 +1066,11 @@
                 group.add(flame);
 
                 // Light
-                const light = new THREE.PointLight(0xff9900, 0.8, 5);
-                light.position.y = 0.2;
-                group.add(light);
+                const light = Math.random() < lampLightChance ? new THREE.PointLight(0xff9900, 0.6, 4) : null;
+                if (light) {
+                    light.position.y = 0.2;
+                    group.add(light);
+                }
 
                 const radius = Math.random() * 25;
                 const theta = Math.random() * Math.PI * 2;
@@ -1086,6 +1111,7 @@
             });
             fireflies = new THREE.Points(geo, mat);
             fireflies.userData.bases = bases;
+            fireflies.geometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
             // Store random phases for smooth blinking/moving
             fireflies.userData.phases = new Float32Array(fireflyCount).map(() => Math.random() * Math.PI * 2);
             scene.add(fireflies);
@@ -1100,9 +1126,11 @@
             const mesh = new THREE.Mesh(geo, mat);
             
             // The flame inside
-            const light = new THREE.PointLight(0xff8800, 1.5, 12);
-            light.position.y = -0.3;
-            mesh.add(light);
+            if (Math.random() < lanternLightChance) {
+                const light = new THREE.PointLight(0xff8800, lowPowerDevice ? 0.75 : 1.1, 9);
+                light.position.y = -0.3;
+                mesh.add(light);
+            }
             
             mesh.position.set(intersectPoint.x, 0, intersectPoint.z);
             scene.add(mesh);
@@ -1128,7 +1156,7 @@
             // Random vibrant color for the firework
             const color = new THREE.Color().setHSL(Math.random(), 1, 0.6);
             const geo = new THREE.BufferGeometry();
-            const particleCount = 80;
+            const particleCount = fireworksParticleCount;
             const verts = [];
             const vels = [];
             
@@ -1146,6 +1174,8 @@
             }
             geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
             geo.setAttribute('velocity', new THREE.Float32BufferAttribute(vels, 3));
+            geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+            geo.attributes.velocity.setUsage(THREE.DynamicDrawUsage);
             
             const mat = new THREE.PointsMaterial({ 
                 color: color, size: 0.4, transparent: true, blending: THREE.AdditiveBlending 
@@ -1171,8 +1201,8 @@
                     const sourceCluster = gltf.scene;
                     sourceCluster.traverse((child) => {
                         if (!child.isMesh) return;
-                        child.castShadow = true;
-                        child.receiveShadow = true;
+                        child.castShadow = false;
+                        child.receiveShadow = false;
                         if (child.material) {
                             child.material = child.material.clone();
                             if ('emissiveIntensity' in child.material) {
@@ -1234,7 +1264,7 @@
                 raycaster.setFromCamera(mouse, camera);
 
                 // Intersect lanterns
-                const intersects = raycaster.intersectObjects(scene.children, true);
+                const intersects = raycaster.intersectObjects(clickableLanternMeshes, true);
                 let clickedLantern = false;
                 
                 for (let i = 0; i < intersects.length; i++) {
@@ -1252,7 +1282,9 @@
                         
                         obj.userData.shell.material.color.copy(newColor);
                         obj.userData.shell.material.emissive.copy(newColor);
-                        obj.userData.light.color.copy(newColor);
+                        if (obj.userData.light) {
+                            obj.userData.light.color.copy(newColor);
+                        }
                         obj.userData.frillMat.color.copy(newColor);
                         
                         // Give it a little spin boost
@@ -1306,6 +1338,55 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
             composer.setSize(window.innerWidth, window.innerHeight);
+            const bloomPass = composer.passes[1];
+            if (bloomPass && bloomPass.setSize) {
+                bloomPass.setSize(window.innerWidth * activeBloomScale, window.innerHeight * activeBloomScale);
+            }
+        }
+
+        function applyAdaptiveQuality(scale) {
+            const clamped = Math.min(qualityScaleMax, Math.max(qualityScaleMin, scale));
+            if (Math.abs(clamped - activeQualityScale) < 0.04) return;
+
+            activeQualityScale = clamped;
+            activeBloomScale = baseBloomScale * (0.82 + activeQualityScale * 0.18);
+            activeDynamicUpdateStride = activeQualityScale < 0.9 ? baseDynamicUpdateStride + 1 : baseDynamicUpdateStride;
+            visualUpdateStride = activeQualityScale < 0.86 ? 3 : (lowPowerDevice ? 3 : 2);
+
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, basePixelRatioCap * activeQualityScale));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            const bloomPass = composer && composer.passes ? composer.passes[1] : null;
+            if (bloomPass) {
+                bloomPass.strength = baseBloomStrength * (0.84 + activeQualityScale * 0.16);
+                bloomPass.radius = baseBloomRadius * (0.85 + activeQualityScale * 0.15);
+                bloomPass.threshold = baseBloomThreshold + (1 - activeQualityScale) * 0.08;
+                if (bloomPass.setSize) {
+                    bloomPass.setSize(window.innerWidth * activeBloomScale, window.innerHeight * activeBloomScale);
+                }
+            }
+
+            if (composer.userData && composer.userData.cinematicPass) {
+                composer.userData.cinematicPass.uniforms.uStrength.value = 0.2 + 0.08 * activeQualityScale;
+            }
+        }
+
+        function sampleAdaptiveQuality(delta) {
+            adaptiveSampleTime += delta;
+            adaptiveFrameCount++;
+            if (adaptiveSampleTime < 1.2) return;
+
+            const avgDelta = adaptiveSampleTime / Math.max(1, adaptiveFrameCount);
+            const avgFps = 1 / Math.max(0.0001, avgDelta);
+
+            if (avgFps < 42) {
+                applyAdaptiveQuality(activeQualityScale - 0.06);
+            } else if (avgFps > 55) {
+                applyAdaptiveQuality(activeQualityScale + 0.04);
+            }
+
+            adaptiveSampleTime = 0;
+            adaptiveFrameCount = 0;
         }
 
         function animate() {
@@ -1321,22 +1402,25 @@
             controls.update();
 
             frameTick++;
+            sampleAdaptiveQuality(delta);
 
             // Animate Water ripples
             if (water) {
                 const pos = water.geometry.attributes.position;
                 const origZ = water.userData.originalZ;
-                if (frameTick % dynamicUpdateStride === 0) {
+                if (frameTick % activeDynamicUpdateStride === 0) {
+                    const array = pos.array;
                     for(let i=0; i<pos.count; i++) {
-                        const x = pos.getX(i);
-                        const y = pos.getY(i);
+                        const idx = i * 3;
+                        const x = array[idx];
+                        const y = array[idx + 1];
                         // Simple sine wave displacement
                         const offset = Math.sin(x * 0.2 + time) * (isMobile ? 0.07 : 0.1) + Math.cos(y * 0.2 + time * 0.8) * (isMobile ? 0.07 : 0.1);
-                        pos.setZ(i, origZ[i] + offset);
+                        array[idx + 2] = origZ[i] + offset;
                     }
                     pos.needsUpdate = true;
                 }
-                if (!isMobile || frameTick % 3 === 0) {
+                if (!lowPowerDevice && frameTick % 7 === 0) {
                     water.geometry.computeVertexNormals(); // Update lighting on water
                 }
             }
@@ -1345,35 +1429,41 @@
                 moonGlow.scale.setScalar(1 + Math.sin(time * 0.6) * 0.025);
             }
 
-            if (horizonMist) {
+            if (horizonMist && frameTick % visualUpdateStride === 0) {
                 horizonMist.children.forEach((mist, index) => {
                     mist.position.y = 3 + Math.sin(time * 0.2 + index) * 0.5;
                     mist.position.x += Math.sin(time * 0.05 + index) * 0.01;
                 });
             }
 
-            auroraBands.forEach((band, index) => {
-                band.material.opacity = 0.045 + Math.max(0, Math.sin(time * band.userData.speed + band.userData.phase)) * 0.035;
-                band.position.y = 24 + index * 2 + Math.sin(time * 0.12 + band.userData.phase) * 1.2;
-            });
+            if (frameTick % visualUpdateStride === 0) {
+                auroraBands.forEach((band, index) => {
+                    band.material.opacity = 0.045 + Math.max(0, Math.sin(time * band.userData.speed + band.userData.phase)) * 0.035;
+                    band.position.y = 24 + index * 2 + Math.sin(time * 0.12 + band.userData.phase) * 1.2;
+                });
+            }
 
             if (distantSilhouette) {
                 distantSilhouette.rotation.y = Math.sin(time * 0.03) * 0.04;
             }
 
-            skyWisps.forEach((wisp) => {
-                const d = wisp.userData;
-                wisp.position.x = d.baseX + Math.sin(time * d.drift + d.phase) * 4.5;
-                wisp.position.y = d.baseY + Math.cos(time * (d.drift * 0.8) + d.phase) * 1.4;
-                wisp.material.opacity = 0.03 + Math.max(0, Math.sin(time * 0.5 + d.phase)) * 0.035;
-            });
+            if (frameTick % visualUpdateStride === 0) {
+                skyWisps.forEach((wisp) => {
+                    const d = wisp.userData;
+                    wisp.position.x = d.baseX + Math.sin(time * d.drift + d.phase) * 4.5;
+                    wisp.position.y = d.baseY + Math.cos(time * (d.drift * 0.8) + d.phase) * 1.4;
+                    wisp.material.opacity = 0.03 + Math.max(0, Math.sin(time * 0.5 + d.phase)) * 0.035;
+                });
+            }
 
-            flagPanels.forEach((panel) => {
-                const d = panel.userData;
-                panel.rotation.z = Math.sin(time * 3.1 + d.phase) * 0.13 * d.sway;
-                panel.rotation.y = Math.cos(time * 2.3 + d.phase) * 0.08 * d.side;
-                panel.position.y = d.baseY + Math.sin(time * 3.8 + d.phase) * 0.02;
-            });
+            if (frameTick % visualUpdateStride === 0) {
+                flagPanels.forEach((panel) => {
+                    const d = panel.userData;
+                    panel.rotation.z = Math.sin(time * 3.1 + d.phase) * 0.13 * d.sway;
+                    panel.rotation.y = Math.cos(time * 2.3 + d.phase) * 0.08 * d.side;
+                    panel.position.y = d.baseY + Math.sin(time * 3.8 + d.phase) * 0.02;
+                });
+            }
 
             // Animate Atapattam (Lanterns)
             lanterns.forEach(group => {
@@ -1403,7 +1493,9 @@
                 // Flicker flame
                 const flicker = 1 + Math.sin(time * 20 * d.flickerSpeed) * 0.2;
                 d.flame.scale.set(1, flicker, 1);
-                d.light.intensity = 0.8 * flicker;
+                if (d.light) {
+                    d.light.intensity = 0.6 * flicker;
+                }
             });
 
             // Animate Custom GLB Models
@@ -1416,15 +1508,16 @@
             });
 
             // Animate Fireflies (Ambient glowing bugs)
-            if (fireflies && frameTick % dynamicUpdateStride === 0) {
+            if (fireflies && frameTick % activeDynamicUpdateStride === 0) {
                 const pos = fireflies.geometry.attributes.position;
                 const phases = fireflies.userData.phases;
                 const bases = fireflies.userData.bases;
+                const array = pos.array;
                 for(let i=0; i<pos.count; i++) {
                     const baseIndex = i * 3;
-                    pos.setX(i, bases[baseIndex] + Math.cos(time + phases[i]) * 0.8);
-                    pos.setY(i, bases[baseIndex + 1] + Math.sin(time * 1.8 + phases[i]) * 0.45);
-                    pos.setZ(i, bases[baseIndex + 2] + Math.sin(time * 0.8 + phases[i]) * 0.8);
+                    array[baseIndex] = bases[baseIndex] + Math.cos(time + phases[i]) * 0.8;
+                    array[baseIndex + 1] = bases[baseIndex + 1] + Math.sin(time * 1.8 + phases[i]) * 0.45;
+                    array[baseIndex + 2] = bases[baseIndex + 2] + Math.sin(time * 0.8 + phases[i]) * 0.8;
                 }
                 pos.needsUpdate = true;
             }
@@ -1447,7 +1540,7 @@
             }
 
             // Occasional Fireworks in the distant sky
-            if (time - lastFireworkTime > (fireworkMinGap + Math.random() * (fireworkMaxGap - fireworkMinGap)) && fireworks.length < (isMobile ? 2 : 4)) {
+            if (time - lastFireworkTime > (fireworkMinGap + Math.random() * (fireworkMaxGap - fireworkMinGap)) && fireworks.length < maxActiveFireworks) {
                 launchFirework();
                 lastFireworkTime = time;
             }
@@ -1460,20 +1553,24 @@
                 
                 const pos = fw.points.geometry.attributes.position;
                 const vel = fw.points.geometry.attributes.velocity;
+                const posArray = pos.array;
+                const velArray = vel.array;
+                const drag = Math.pow(0.94, step);
                 
                 for(let j=0; j<pos.count; j++) {
+                    const idx = j * 3;
                     // Update positions based on velocity
-                    pos.setX(j, pos.getX(j) + vel.getX(j) * step);
-                    pos.setY(j, pos.getY(j) + vel.getY(j) * step - 0.005 * step); // Subtle gravity arc
-                    pos.setZ(j, pos.getZ(j) + vel.getZ(j) * step);
+                    posArray[idx] += velArray[idx] * step;
+                    posArray[idx + 1] += velArray[idx + 1] * step - 0.005 * step;
+                    posArray[idx + 2] += velArray[idx + 2] * step;
                     
                     // Air resistance / slow down
-                    const drag = Math.pow(0.94, step);
-                    vel.setX(j, vel.getX(j) * drag);
-                    vel.setY(j, vel.getY(j) * drag);
-                    vel.setZ(j, vel.getZ(j) * drag);
+                    velArray[idx] *= drag;
+                    velArray[idx + 1] *= drag;
+                    velArray[idx + 2] *= drag;
                 }
                 pos.needsUpdate = true;
+                vel.needsUpdate = true;
                 
                 // Fade out as they age
                 fw.points.material.opacity = 1 - (fw.age / fw.maxAge);
